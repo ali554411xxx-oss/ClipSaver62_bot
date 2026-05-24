@@ -1,90 +1,37 @@
-import telebot
-import yt_dlp
 import os
-import time
-from flask import Flask
-from threading import Thread
+import telebot
+from flask import Flask, request
 
-# ------------------------------
-# 🔑 توكن البوت (استبدله بتوكنك الحقيقي)
 TOKEN = '8825458063:AAFWpeDU0wH8W_brXsEVi7amR4kTA5qr6CQ'
-# ------------------------------
-
-# إعداد مسار التحميل
-DOWNLOAD_PATH = 'downloads'
-if not os.path.exists(DOWNLOAD_PATH):
-    os.makedirs(DOWNLOAD_PATH)
-
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-# ------------------------------
-# جزء Flask لإبقاء السيرفر مستيقظاً (ضروري لـ Render)
-app = Flask('')
+# الرابط العام اللي راح يعطيك إياه Render (مثلاً: https://my-bot.onrender.com)
+WEBHOOK_URL = 'http://t.me/ClipSaver62_bot'
 
-@app.route('/')
-def home():
-    return "✅ البوت يعمل!"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
-
-# تشغيل Flask في خيط منفصل
-Thread(target=run_flask).start()
-# ------------------------------
-
-# أمر /start
+# معالج أوامر البوت
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "👋 مرحباً! أرسل رابط فيديو من يوتيوب، انستقرام، تيك توك أو أي موقع آخر وسأقوم بتحميله وإرساله لك، ثم سأحذفه من الخادم فوراً!")
+    bot.reply_to(message, "أهلاً وسهلاً! البوت يعمل بنجاح.")
 
-# معالجة أي رسالة نصية (الروابط)
-@bot.message_handler(func=lambda message: True)
-def download_video(message):
-    url = message.text.strip()
-    
-    if not url.startswith(('http://', 'https://')):
-        bot.reply_to(message, "❌ الرجاء إرسال رابط صحيح يبدأ بـ http:// أو https://")
-        return
+# نقطة النهاية اللي راح يرسل ليها تلجرام التحديثات
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK', 200
+    else:
+        return 'Unsupported Media Type', 415
 
-    processing_msg = bot.reply_to(message, "⏳ جاري تحميل الفيديو...")
-    
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best',  # أفضل جودة بصيغة mp4
-        'outtmpl': f'{DOWNLOAD_PATH}/%(title)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-    }
+# رابط تجربة عشان تتأكد إن السيرفر شغال
+@app.route('/')
+def hello():
+    return "Hello! The bot is running."
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            # إذا كان الملف بصيغة أخرى غير mp4 (مثل webm) نحاول تعديل الامتداد
-            if not os.path.exists(filename):
-                for ext in ['.mp4', '.mkv', '.webm']:
-                    test_name = filename.rsplit('.', 1)[0] + ext
-                    if os.path.exists(test_name):
-                        filename = test_name
-                        break
-            
-            file_size = os.path.getsize(filename) / (1024 * 1024)
-            bot.edit_message_text(f"📤 تم التحميل! جاري الإرسال ({file_size:.1f} MB)...", 
-                                  message.chat.id, processing_msg.message_id)
-            
-            # إرسال الفيديو
-            with open(filename, 'rb') as video:
-                bot.send_video(message.chat.id, video, caption=f"✅ {info.get('title', 'تم التحميل')[:50]}")
-            
-            # حذف الملف لتوفير المساحة
-            os.remove(filename)
-            bot.edit_message_text("✅ تم الإرسال والحذف بنجاح!", message.chat.id, processing_msg.message_id)
-    
-    except Exception as e:
-        error_msg = f"❌ حدث خطأ: {str(e)[:200]}"
-        bot.edit_message_text(error_msg, message.chat.id, processing_msg.message_id)
-
-# تشغيل البوت
-if __name__ == '__main__':
-    print("🚀 البوت يعمل مع Flask...")
-    bot.infinity_polling()
+if __name__ == "__main__":
+    # نتأكد إن مافي ويب هوك قديم مربوط قبل ما نضيف الجديد
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 8080)))
